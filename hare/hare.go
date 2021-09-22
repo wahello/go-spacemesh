@@ -306,6 +306,8 @@ func (h *Hare) outputCollectionLoop(ctx context.Context) {
 			logger := h.WithContext(ctx).WithFields(layerID)
 
 			// collect coinflip, regardless of success
+			// TODO: record coinflip immediately upon completion of the pre-round (rather than waiting for
+			//   hare to finish)
 			logger.With().Info("recording weak coinflip result for layer",
 				log.Bool("coinflip", coin))
 			h.mesh.RecordCoinflip(ctx, layerID, coin)

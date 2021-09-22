@@ -82,6 +82,7 @@ func (a vec) String() string {
 }
 
 func calculateOpinionWithThreshold(logger log.Log, v vec, layerSize int, theta uint8, delta float64) vec {
+	// TODO: replace layerSize with expected layer weight; theta should be fixed-point, may need more bits
 	threshold := float64(theta) / 100 * delta * float64(layerSize)
 	netVote := float64(v.netVote())
 	logger.With().Debug("threshold opinion",

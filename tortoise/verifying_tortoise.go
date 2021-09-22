@@ -1021,9 +1021,7 @@ func (t *turtle) layerOpinionVector(ctx context.Context, layerID types.LayerID) 
 						blockID, layerID, err)
 				}
 
-				// TODO: should delta here represent layer depth, or should it always be 1?
-				//   votes are counted for all layers!
-				//   see https://github.com/spacemeshos/go-spacemesh/issues/2677
+				// hardcode delta to one, i.e., do not factor in layer depth
 				localOpinionOnBlock := calculateOpinionWithThreshold(t.logger, sum, t.AvgLayerSize, t.LocalThreshold, 1)
 				logger.With().Debug("local opinion on block in old layer",
 					sum,
@@ -1040,6 +1038,9 @@ func (t *turtle) layerOpinionVector(ctx context.Context, layerID types.LayerID) 
 					// honest parties.
 					// we use the weak coin for the _previous_ layer since we expect to receive blocks for a layer
 					// before hare finishes for that layer, i.e., before the weak coin value is ready for the layer.
+
+					// TODO: use weak coin for current layer, not previous layer (because hare may lag)
+
 					// TODO: update this logic per https://github.com/spacemeshos/go-spacemesh/issues/2688
 
 					// TODO: if we rescore old blocks, it's very likely that newly-created blocks will contain
