@@ -37,6 +37,15 @@ var (
 		"configuration for smesher service",
 		fastnet.SmesherConfig,
 	)
+
+	smesherLimit = apiv1.ResourceList{
+		apiv1.ResourceCPU:    resource.MustParse("0.5"),
+		apiv1.ResourceMemory: resource.MustParse("500Mi"),
+	}
+	bootLimit = apiv1.ResourceList{
+		apiv1.ResourceCPU:    resource.MustParse("1.5"),
+		apiv1.ResourceMemory: resource.MustParse("500Mi"),
+	}
 )
 
 const (
@@ -58,7 +67,10 @@ func persistentVolumeClaim(podname string) string {
 	return fmt.Sprintf("%s-%s", persistentVolumeName, podname)
 }
 
-const prometheusScrapePort = 9216
+const (
+	prometheusScrapePort = 9216
+	phlareScrapePort     = 6060
+)
 
 // Node ...
 type Node struct {
@@ -119,8 +131,13 @@ func deployPoetPod(ctx *testcontext.Context, id string, flags ...DeploymentFlag)
 					).
 					WithResources(corev1.ResourceRequirements().WithRequests(
 						apiv1.ResourceList{
-							apiv1.ResourceCPU:    resource.MustParse("0.5"),
-							apiv1.ResourceMemory: resource.MustParse("1Gi"),
+							apiv1.ResourceCPU:    resource.MustParse("1"),
+							apiv1.ResourceMemory: resource.MustParse("2Gi"),
+						},
+					).WithLimits(
+						apiv1.ResourceList{
+							apiv1.ResourceCPU:    resource.MustParse("1"),
+							apiv1.ResourceMemory: resource.MustParse("2Gi"),
 						},
 					)),
 				),
@@ -269,7 +286,7 @@ func labelSelector(id string) string {
 	return fmt.Sprintf("id=%s", id)
 }
 
-func deployNodes(ctx *testcontext.Context, name string, from, to int, flags []DeploymentFlag) ([]*NodeClient, error) {
+func deployNodes(ctx *testcontext.Context, name string, from, to int, flags []DeploymentFlag, resources apiv1.ResourceList) ([]*NodeClient, error) {
 	var (
 		eg      errgroup.Group
 		clients = make(chan *NodeClient, to-from)
@@ -287,7 +304,7 @@ func deployNodes(ctx *testcontext.Context, name string, from, to int, flags []De
 			podname := fmt.Sprintf("%s-0", setname)
 			labels := nodeLabels(name, podname)
 			labels["bucket"] = strconv.Itoa(i % buckets)
-			if err := deployNode(ctx, setname, labels, finalFlags); err != nil {
+			if err := deployNode(ctx, setname, labels, finalFlags, resources); err != nil {
 				return err
 			}
 			node, err := waitNode(ctx, podname, Smesher)
@@ -329,7 +346,7 @@ func deleteNode(ctx *testcontext.Context, podname string) error {
 	return nil
 }
 
-func deployNode(ctx *testcontext.Context, name string, labels map[string]string, flags []DeploymentFlag) error {
+func deployNode(ctx *testcontext.Context, name string, labels map[string]string, flags []DeploymentFlag, resources apiv1.ResourceList) error {
 	svc := corev1.Service(headlessSvc(name), ctx.Namespace).
 		WithLabels(labels).
 		WithSpec(corev1.ServiceSpec().
@@ -377,8 +394,10 @@ func deployNode(ctx *testcontext.Context, name string, labels map[string]string,
 			WithTemplate(corev1.PodTemplateSpec().
 				WithAnnotations(
 					map[string]string{
-						"prometheus.io/port":   strconv.Itoa(prometheusScrapePort),
-						"prometheus.io/scrape": "true",
+						"prometheus.io/port":        strconv.Itoa(prometheusScrapePort),
+						"prometheus.io/scrape":      "true",
+						"phlare.grafana.com/port":   strconv.Itoa(phlareScrapePort),
+						"phlare.grafana.com/scrape": "true",
 					},
 				).
 				WithLabels(labels).
@@ -396,24 +415,15 @@ func deployNode(ctx *testcontext.Context, name string, labels map[string]string,
 							corev1.ContainerPort().WithContainerPort(7513).WithName("p2p"),
 							corev1.ContainerPort().WithContainerPort(9092).WithName("grpc"),
 							corev1.ContainerPort().WithContainerPort(prometheusScrapePort).WithName("prometheus"),
+							corev1.ContainerPort().WithContainerPort(phlareScrapePort).WithName("pprof"),
 						).
 						WithVolumeMounts(
 							corev1.VolumeMount().WithName("data").WithMountPath("/data"),
 							corev1.VolumeMount().WithName("config").WithMountPath(configDir),
 						).
 						WithResources(corev1.ResourceRequirements().
-							WithRequests(
-								apiv1.ResourceList{
-									apiv1.ResourceCPU:    resource.MustParse("0.5"),
-									apiv1.ResourceMemory: resource.MustParse("200Mi"),
-								},
-							).
-							WithLimits(
-								apiv1.ResourceList{
-									apiv1.ResourceCPU:    resource.MustParse("2"),
-									apiv1.ResourceMemory: resource.MustParse("1Gi"),
-								},
-							),
+							WithRequests(resources).
+							WithLimits(resources),
 						).
 						WithStartupProbe(
 							corev1.Probe().WithTCPSocket(
@@ -421,7 +431,7 @@ func deployNode(ctx *testcontext.Context, name string, labels map[string]string,
 							).WithInitialDelaySeconds(10).WithPeriodSeconds(10),
 						).
 						WithEnv(
-							corev1.EnvVar().WithName("GOMAXPROCS").WithValue("2"),
+							corev1.EnvVar().WithName("GOMAXPROCS").WithValue("8"),
 						).
 						WithCommand(cmd...),
 					)),
